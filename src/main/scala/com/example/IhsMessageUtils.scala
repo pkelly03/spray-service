@@ -69,15 +69,18 @@ object TokenService {
   private val AESIVSize    = AESBlockSize / 8
 
   private def getKeyLength: Int = 1
-  
+
+  val encoder = new BASE64Encoder()
+  val decoder = new BASE64Decoder()
+
   
   def createJWT() = {
     val iv = buildIV
     val claimsSet = new JWTClaimsSet();
     claimsSet.setSubject("sub");
     claimsSet.setIssuer("IHS");
-    claimsSet.setCustomClaim("ihs:iv", new BASE64Encoder().encode(iv))
-    claimsSet.setCustomClaim("ihs:vpd", encrypt(iv, "[[message to encrypt]]"))
+    claimsSet.setCustomClaim("ihs:iv", encoder.encode(iv))
+    claimsSet.setCustomClaim("ihs:vpd", encoder.encode(encrypt(iv, "[[message to encrypt]]").getBytes("UTF-8")))
     val signedJWT = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claimsSet)
     signedJWT.sign(getSigner)
     signedJWT.serialize()
@@ -92,30 +95,21 @@ object TokenService {
   private def buildIV = {
     // build the initialization vector(randomly).
     val ivBytes = new Array[Byte](16)
-    SecureRandom.getSeed(16)
     SecureRandom.getInstance("SHA1PRNG").nextBytes(ivBytes)
     ivBytes
   }
 
-  
   def parseJWT(jwtString: String) = {
     val signedJWT = SignedJWT.parse(jwtString)
     if (signedJWT.verify(getVerifier)) {
       println("Verified...")
       val jwtClaimsSet = signedJWT.getJWTClaimsSet()
-      val subject = jwtClaimsSet.getSubject()
-      val issuer = jwtClaimsSet.getIssuer()
       val encodedIV = jwtClaimsSet.getCustomClaim("ihs:iv").asInstanceOf[String]
-      val encryptedPayload = jwtClaimsSet.getCustomClaim("ihs:vpd").asInstanceOf[String]
-      
+      val encodedEncryptedPayload = jwtClaimsSet.getCustomClaim("ihs:vpd").asInstanceOf[String]
 
-      println("Subject : " + subject)
-      println("Encoded IV : " + encodedIV)
-      val iv = new BASE64Decoder().decodeBuffer(encodedIV)
-      println("Decoded IV : " + iv)
-
-      println("VPD : " + encryptedPayload)
-      val decryptedMessageAsBytes = decrypt(iv, encryptedPayload)
+      val iv = decoder.decodeBuffer(encodedIV)
+      val encryptedPayload = decoder.decodeBuffer(encodedEncryptedPayload)
+      val decryptedMessageAsBytes = decrypt(iv, new String(encryptedPayload))
       println("Decrypted message " + new String(decryptedMessageAsBytes, "UTF-8"))
     } else {
       println("Not verfied..")
@@ -133,13 +127,13 @@ object TokenService {
     cipher.init(Cipher.ENCRYPT_MODE, secretKey,new IvParameterSpec(iv))
     val cipherText = cipher.doFinal(message.getBytes("UTF-8"))
     // prepend the iv to the cipher text
-    new BASE64Encoder().encode(cipherText)
+    encoder.encode(cipherText)
   }
 
   // Decrypt a Base64-encoded string into a byte array
   def decrypt(iv:Array[Byte], message: String): Array[Byte] = {
     val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-    val decodedMessage = new BASE64Decoder().decodeBuffer(message)
+    val decodedMessage = decoder.decodeBuffer(message)
     cipher.init(Cipher.DECRYPT_MODE, secretKey, new IvParameterSpec(iv))
     cipher.doFinal(decodedMessage)
   }
